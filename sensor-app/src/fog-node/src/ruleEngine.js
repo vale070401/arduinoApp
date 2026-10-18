@@ -1,9 +1,9 @@
 class RuleEngine {
   constructor() {
     this.rules = [
-      { type: 'normal', threshold: 10000, action: 'log' },
-      { type: 'humidity', threshold: 16000, action: 'alert' },
-      { type: 'leak', threshold: 20000, action: 'critical' }
+      { type: 'normal', threshold: 1000, action: 'log' },
+      { type: 'humidity', threshold: 1600, action: 'alert' },
+      { type: 'leak', threshold: 1800, action: 'critical' }
     ];
   }
 
@@ -21,7 +21,7 @@ class RuleEngine {
   evaluateRule(rule, value) {
     switch (rule.type) {
       case 'normal': return value <= rule.threshold;
-      case 'humidity': return value > 10000 && value <= rule.threshold;
+      case 'humidity': return value > 1000 && value <= rule.threshold;
       case 'leak': return value > rule.threshold;
       default: return false;
     }
