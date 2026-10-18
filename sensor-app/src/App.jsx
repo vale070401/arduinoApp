@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react'
+import mqtt from 'mqtt'
 import './App.css'
 
 function App() {
@@ -6,6 +7,8 @@ function App() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
   const [lastUpdate, setLastUpdate] = useState(null)
+  const [alerts, setAlerts] = useState([])
+  const [mqttStatus, setMqttStatus] = useState('disconnected')
 
   const fetchSensorData = async () => {
     try {
@@ -29,7 +32,64 @@ function App() {
   useEffect(() => {
     fetchSensorData()
     const interval = setInterval(fetchSensorData, 60000)
-    return () => clearInterval(interval)
+
+    //Conectar a MQTT para alertas en tiempo real
+    const mqttBroker = import.meta.env.VITE_MQTT_BROKER || 'ws://localhost:9001/mqtt'
+    const client = mqtt.connect(mqttBroker, {
+      clientId: 'web-client-' + Math.random().toString(16).substr(2, 8),
+      clean: true,
+      reconnectPeriod: 1000,
+    })
+
+    // En App.jsx, reemplazar la parte de connect (líneas 44-51)
+    client.on('connect', ()=>{
+    console.log('Conectado al MQTT')
+    setMqttStatus('connected')
+  
+    // Agregar un pequeño delay antes de suscribirse
+    setTimeout(() => {
+      client.subscribe('alerts/all', (err) => {
+        if (err) console.error('Error suscribiendo a alerts/all:', err)
+      })
+      client.subscribe('alert/+/+', (err) => {
+        if (err) console.error('Error suscribiendo a alert/+/+:', err)
+      })
+      client.subscribe('emergency/critical', (err) => {
+        if (err) console.error('Error suscribiendo a emergency/critical:', err)
+      })
+    }, 100)
+  })
+
+    client.on('message',(topic, message) => {
+      try{
+        const alertData = JSON.parse(message.toString())
+        console.log(`Mensaje MQTT: ${topic}`, alertData)
+
+        setAlerts(prev => [{
+          ...alertData,
+          topic,
+          timestamp: new Date().toISOString()
+        }, ...prev].slice(0, 10))//solo mantiene las ultimas 10 alertas
+      }catch(error){
+        console.error('Error parsing MQTT message:', error)
+      }
+    })
+
+    client.on('error', (err) =>{
+      console.error('Error MQTT:', err)
+      setMqttStatus('error')
+    })
+
+    client.on('disconnect', () => {
+      console.log('Desconectado del MQTT')
+      setMqttStatus('error')
+    })
+
+    
+    return () => {
+      clearInterval(interval)
+      client.end()
+    }
   }, [])
 
   return (
@@ -37,9 +97,14 @@ function App() {
       <h1>Panel de Sensores</h1>
       
       <div className="status-bar">
-        <span className="last-update">
-          Última actualización: {lastUpdate || 'Nunca'}
-        </span>
+        <div className="status-info">
+          <span className="last-update">
+            Última actualización: {lastUpdate || 'Nunca'}
+          </span>
+          <span className={`mqtt-status ${mqttStatus}`}>
+            MQTT: {mqttStatus === 'connected' ? '🟢 Conectado' : '🔴 Desconectado'}
+          </span>
+        </div>
         <button onClick={fetchSensorData} className="refresh-btn">
           Actualizar ahora
         </button>
@@ -150,6 +215,31 @@ function App() {
           </div>
         </div>
       )}
+      {alerts.length > 0 && (
+        <div className="alerts-section">
+          <h3> Alertas Recientes</h3>
+        <div className="alerts-list">
+          {alerts.map((alert, index) => (
+          <div key={index} className={`alert-item ${alert.severity}`}>
+            <div className="alert-header">
+              <span className="alert-type">{alert.alert_type}</span>
+                <span className="alert-time">
+                  {new Date(alert.timestamp).toLocaleTimeString()}
+                </span>
+              </div>
+              <div className="alert-message">{alert.message}</div>
+              {alert.value && (
+                <div className="alert-details">
+                  Valor: {alert.value} | Umbral: {alert.threshold}
+                </div>
+              )}
+            </div>
+          ))}
+        </div>
+      </div>
+    )}
+    
+
 
       {loading && sensorData !== null && (
         <div className="loading">Actualizando...</div>
